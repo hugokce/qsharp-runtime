@@ -22,6 +22,7 @@ open Microsoft.Quantum.QsCompiler.CsharpGeneration.SimulationCode
 open Microsoft.Quantum.QsCompiler.DataTypes
 open Microsoft.Quantum.QsCompiler.ReservedKeywords
 open Microsoft.Quantum.QsCompiler.SyntaxTree
+open Microsoft.Quantum.QsCompiler.TargetGeneration.GenerateTarget
 
 
 module SimulationCode =
@@ -3814,4 +3815,8 @@ namespace Microsoft.Quantum.Tests.UnitTests
         testOneFile (Path.Combine("Circuits","UnitTests.qs"))
 
 
-
+    [<Fact>]
+    let ``test target generation`` () =
+        let syntaxTree = parse [ (Path.Combine("Circuits", "Intrinsic.qs")) ]
+        GenerateTarget syntaxTree "Target,cs" "TargetSim" "Test" None
+        ()

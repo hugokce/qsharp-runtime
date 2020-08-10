@@ -23,6 +23,9 @@ open Microsoft.Quantum.QsCompiler.Transformations.BasicTransformations
 open System.Collections.Immutable
 
 module Utils =
+    let TargetQualifiedClassKey = "TargetClass"
+    let ExtendsTargetKey = "TargetToExtend"
+
     let namespaceElementIsIntrinsic elem =
         match elem with
         | QsCallable callable -> 
@@ -53,5 +56,11 @@ type TargetGenerationContext =
     static member Create(syntaxTree) =
         { assemblyConstants = ImmutableDictionary.Empty; intrinsics = syntaxTree |> findIntrinsics }
 
-    member this.GenerateTarget(filePath) =
+    member this.GenerateTarget(dir) =
+        let fullName = this.assemblyConstants.[TargetQualifiedClassKey]
+        let targetNamespace = fullName.Substring(0, fullName.LastIndexOf('.'))
+        let targetClassName = fullName.Substring(fullName.LastIndexOf('.') + 1)
+        let baseClassName = match this.assemblyConstants.TryGetValue ExtendsTargetKey with | (true, s) -> Some s | (false, _) -> None
+        let outputFileName = Path.Combine(dir, targetClassName + ".cs")
+
         ()

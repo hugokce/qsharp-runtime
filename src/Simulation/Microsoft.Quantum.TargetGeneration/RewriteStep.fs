@@ -15,11 +15,15 @@ open Microsoft.Quantum.QsCompiler.ReservedKeywords
 open Microsoft.Quantum.QsCompiler.SyntaxTree
 open Microsoft.Quantum.QsCompiler.Transformations.BasicTransformations
 
+open GenerateTarget
 
 type Emitter() =
 
     let _AssemblyConstants = new Dictionary<_, _>()
     let mutable _Diagnostics = []
+
+    let TargetQualifiedClassKey = "TargetClass"
+    let ExtendsTargetKey = "TargetToExtend"
 
     interface IRewriteStep with
 
@@ -28,11 +32,13 @@ type Emitter() =
         member this.AssemblyConstants = upcast _AssemblyConstants
         member this.GeneratedDiagnostics = upcast _Diagnostics
         
-        member this.ImplementsPreconditionVerification = false
+        member this.ImplementsPreconditionVerification = true
         member this.ImplementsPostconditionVerification = false
         member this.ImplementsTransformation = true
 
-        member this.PreconditionVerification _ = NotImplementedException() |> raise
+        member this.PreconditionVerification _ = 
+            let step = this :> IRewriteStep
+            step.AssemblyConstants.ContainsKey(TargetQualifiedClassKey)
 
         member this.PostconditionVerification _ = NotImplementedException() |> raise
         
@@ -42,8 +48,13 @@ type Emitter() =
                 | true, outputFolder when outputFolder <> null -> outputFolder
                 | _ -> step.Name
 
-            let context = TargetGenerationContext.Create(compilation.Namespaces, step.AssemblyConstants)
-            context.GenerateTarget(Path.Combine(dir, "Target.cs"))
+            let fullName = step.AssemblyConstants.[TargetQualifiedClassKey]
+            let targetNamespace = fullName.Substring(0, fullName.LastIndexOf('.'))
+            let targetClassName = fullName.Substring(fullName.LastIndexOf('.') + 1)
+            let baseClassName = match step.AssemblyConstants.TryGetValue ExtendsTargetKey with | (true, s) -> Some s | (false, _) -> None
+            let outputFileName = Path.Combine(dir, targetClassName + ".cs")
+
+            GenerateTarget compilation.Namespaces outputFileName targetClassName targetNamespace baseClassName
 
             transformed <- compilation
             true
