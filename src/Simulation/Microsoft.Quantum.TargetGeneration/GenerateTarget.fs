@@ -3,25 +3,15 @@
 
 namespace Microsoft.Quantum.QsCompiler.TargetGeneration
 
-open Microsoft.CodeAnalysis
 open Microsoft.CodeAnalysis.CSharp.Syntax
-open Microsoft.CodeAnalysis.Formatting
 
 open Microsoft.Quantum.RoslynWrapper
 
-open System
 open System.Collections.Generic
 open System.IO
-open Microsoft.CodeAnalysis
-open Microsoft.Quantum.QsCompiler
 open Microsoft.Quantum.QsCompiler.CsharpGeneration
-open Microsoft.Quantum.QsCompiler.DataTypes
-open Microsoft.Quantum.QsCompiler.Diagnostics
-open Microsoft.Quantum.QsCompiler.ReservedKeywords
 open Microsoft.Quantum.QsCompiler.SyntaxTree
-open Microsoft.Quantum.QsCompiler.Transformations.BasicTransformations
-open System.Collections.Immutable
-open Microsoft.Quantum.QsCompiler.CsharpGeneration
+open Microsoft.Quantum.QsCompiler.SyntaxTokens
 
 module GenerateTarget =
     let private autoNamespaces =
@@ -72,26 +62,85 @@ module GenerateTarget =
                         |> simpleBase |> Some
         ``class`` targetClass ``<<`` [] ``>>`` ``:`` baseClass ``,`` [] [``abstract``; ``public``] ``(`` members ``)``
 
-    let buildIntrinsic intrinsic : MemberDeclarationSyntax seq =
-        Seq.empty
+    let private buildImplMethod context args (sp : QsSpecialization) =
+        let outType = SimulationCode.roslynTypeName context sp.Signature.ReturnType
+        match sp.Implementation with
+        | Generated SelfInverse -> Seq.empty
+        | _ ->
+            let implName = "Do" + sp.Parent.Name.Value + match sp.Kind with
+                                                            | QsBody              -> ""
+                                                            | QsAdjoint           -> "Adj"
+                                                            | QsControlled        -> "Ctl"
+                                                            | QsControlledAdjoint -> "CtlAdj"
+            let parms = args |> List.map (fun (n, t) -> ``param`` n ``of`` (``type`` t))
+            let impl = ``method`` outType implName ``<<`` [] ``>>`` 
+                            ``(`` parms ``)`` [``public``;``abstract``]
+                            ``{`` [] ``}`` :> MemberDeclarationSyntax
+            seq { impl }
+
+    let buildImplProperty context args (subclass : MemberDeclarationSyntax) (sp : QsSpecialization) =
+        let generateSelfCall (name : string) =
+            let selfName = name.Replace("Adjoint", "")
+            ``ident`` selfName
+        let inType  = SimulationCode.roslynTypeName context sp.Signature.ArgumentType
+        let outType = SimulationCode.roslynTypeName context sp.Signature.ReturnType
+        let propertyType = "Func<" + inType + ", " + outType + ">"
+        let propertyName =
+            match sp.Kind with
+            | QsBody              -> "Body"
+            | QsAdjoint           -> "AdjointBody"
+            | QsControlled        -> "ControlledBody"
+            | QsControlledAdjoint -> "ControlledAdjointBody"
+        let propertyImpl = match sp.Implementation with
+                           | Generated SelfInverse -> generateSelfCall propertyName |> ignore
+                           | _ -> ()
+        ()
+
+    let buildSpecializationMethods context (subclass : MemberDeclarationSyntax) args (sp : QsSpecialization) =
+        let inType  = SimulationCode.roslynTypeName context sp.Signature.ArgumentType
+        let outType = SimulationCode.roslynTypeName context sp.Signature.ReturnType
+        let propertyType = "Func<" + inType + ", " + outType + ">"
+        let bodyName =
+            match sp.Kind with
+            | QsBody              -> "Body"
+            | QsAdjoint           -> "Adjoint"
+            | QsControlled        -> "Controlled"
+            | QsControlledAdjoint -> "ControlledAdjoint"
+        let impl = buildImplMethod context args sp
+        buildImplProperty context args subclass sp
+        impl
+
+    // Builds the implementing methods in the subclass and for the main class
+    let private buildSubclassMethods context (op : QsCallable) (subclass : MemberDeclarationSyntax) =
+        let args = SimulationCode.flatArgumentsList context op.ArgumentTuple
+        op.Specializations |> Seq.collect (buildSpecializationMethods context subclass args)
+
+    let buildIntrinsic context intrinsic : MemberDeclarationSyntax seq =
+        let subclass = SimulationCode.buildOperationClass context intrinsic
+        Seq.append (buildSubclassMethods context intrinsic subclass) (seq { subclass })
 
     let private namespaceElementIsIntrinsic elem =
         match elem with
         | QsCallable callable -> 
-            if callable.Specializations |> Seq.exists (fun spec -> match spec.Implementation with
-                                                                   | Intrinsic -> true
-                                                                   | _ ->         false)
-            then Some callable
-            else None
+            match callable.Kind with
+            | TypeConstructor -> None
+            | _ -> 
+                if callable.Specializations 
+                   |> Seq.exists (fun spec -> match spec.Implementation with
+                                                    | SpecializationImplementation.Intrinsic -> true
+                                                    | _ -> false)
+                then Some callable
+                else None
         | _ -> None
 
     let private findIntrinsics syntaxTree =
         syntaxTree 
         |> Seq.collect (fun ns -> ns.Elements |> Seq.choose namespaceElementIsIntrinsic)
 
-    let GenerateTarget syntaxTree outputFile targetClass targetNamespace targetBaseClass =
+    let GenerateTarget (syntaxTree : QsNamespace seq) outputFile targetClass targetNamespace targetBaseClass =
+        let context = CodegenContext.Create(syntaxTree, new Dictionary<string, string>())
         let intrinsics = syntaxTree |> findIntrinsics
-        let members = intrinsics |> Seq.collect buildIntrinsic
+        let members = intrinsics |> Seq.collect (buildIntrinsic context)
         let target = buildClass targetClass targetBaseClass members
         let ns = buildNamespace targetNamespace target
         let syntax = buildHeader targetBaseClass ns

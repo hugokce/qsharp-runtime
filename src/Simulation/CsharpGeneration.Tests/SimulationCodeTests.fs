@@ -3817,6 +3817,6 @@ namespace Microsoft.Quantum.Tests.UnitTests
 
     [<Fact>]
     let ``test target generation`` () =
-        let syntaxTree = parse [ (Path.Combine("Circuits", "Intrinsic.qs")) ]
+        let syntaxTree = parse [ (Path.Combine("Circuits", "TestTarget.qs")) ]
         GenerateTarget syntaxTree "Target,cs" "TargetSim" "Test" None
         ()
